@@ -1,6 +1,7 @@
-package server
+package main
 
 import (
+	"VulpesNet/pkg"
 	"VulpesNet/utils"
 	"io"
 	"log"
@@ -10,7 +11,8 @@ import (
 )
 
 type TCPManager struct {
-	ReverseConn sync.Map
+	ControlConn sync.Map
+	WaitingList sync.Map
 }
 
 func (m *TCPManager) Run() {
@@ -33,9 +35,6 @@ func (m *TCPManager) ListenClient() {
 }
 
 func (m *TCPManager) ServeConn(conn io.ReadWriteCloser) {
-	defer func() {
-		_ = conn.Close()
-	}()
 	c := utils.InitJSONCodec(conn)
 	m.ServeCodec(c)
 }
@@ -51,41 +50,54 @@ func (m *TCPManager) ServeCodec(c utils.Codec) {
 	m.HandleRequest(c, &header)
 }
 
-type SSHRequest struct {
-	ServiceId uint64
-	Token     string
-}
-
-type SSHResponse struct {
-	Code int
-	Msg  string
-}
-
 func (m *TCPManager) HandleRequest(c utils.Codec, header *utils.Header) {
 	switch header.MagicNumber {
 	case utils.NewSSH:
-		var req SSHRequest
+		var req pkg.SSHRequest
 		err := c.ReadBody(&req)
 		if err != nil {
 			log.Println("server error: invalid request body ", req)
 			return
 		}
-		serviceCodec, ok := m.ReverseConn.Load(req.ServiceId)
+		codec, ok := m.ControlConn.Load(req.Data)
 		if !ok {
-			m.SendResponse(c, header, SSHResponse{Code: 1, Msg: "server error: not found requested service"})
+			m.SendResponse(c, header, pkg.SSHResponse{Code: 1, Msg: "server error: not found requested service"})
 			return
 		}
-		m.SendResponse(c, header, SSHResponse{Code: 0})
-		m.ProxySSH(c, serviceCodec.(utils.Codec))
+		ch := make(chan utils.Codec)
+		m.WaitingList.Store(req.ServiceId, ch)
+
+		m.BuildReverseConn(codec.(utils.Codec), req.ServiceId)
+		select {
+		case sc := <-ch:
+			go m.ProxySSH(c, sc)
+			m.SendResponse(c, header, pkg.SSHResponse{Code: 0})
+		case <-time.Tick(10 * time.Second):
+			log.Println("server error: service reverse connection time out")
+			return
+		}
 	case utils.RegisterService:
-		var req SSHRequest
+		var req pkg.SSHRequest
 		err := c.ReadBody(&req)
 		if err != nil {
 			log.Println("server error: invalid request body ", req)
 			return
 		}
-		m.ReverseConn.Store(req.ServiceId, c)
-		go m.ServeReverseCodec(c)
+		m.ControlConn.Store(req.ServiceId, c)
+	case utils.ReverseConn:
+		var req pkg.SSHRequest
+		err := c.ReadBody(&req)
+		if err != nil {
+			log.Println("server error: invalid request body ", req)
+			return
+		}
+		some, ok := m.WaitingList.Load(req.Data)
+		if !ok {
+			log.Println("server error: failed to build reverse connection")
+			return
+		}
+		ch := some.(chan utils.Codec)
+		ch <- c
 	}
 }
 
@@ -93,7 +105,17 @@ func (m *TCPManager) ServeReverseCodec(codex utils.Codec) {
 	time.Sleep(15 * time.Minute)
 }
 
+func (m *TCPManager) BuildReverseConn(c utils.Codec, serviceId uint64) {
+	h := utils.Header{MagicNumber: utils.ReverseConn}
+	b := pkg.SSHResponse{
+		Code: 0,
+		Data: serviceId,
+	}
+	_ = c.Write(&h, b)
+}
+
 func (m *TCPManager) ProxySSH(client utils.Codec, service utils.Codec) {
+	log.Println("proxy...")
 	go func() {
 		_, _ = io.Copy(client.GetConn(), service.GetConn())
 	}()

@@ -1,7 +1,7 @@
-package client
+package main
 
 import (
-	"VulpesNet/server"
+	"VulpesNet/pkg"
 	"VulpesNet/utils"
 	"io"
 	"log"
@@ -22,7 +22,7 @@ func InitClient() *Client {
 }
 
 func (c *Client) DialSSH() {
-	conn, err := net.Dial("tcp", ":9000")
+	conn, err := net.Dial("tcp", utils.Host+":9000")
 	if err != nil {
 		log.Println("client error: dial to server failed ", err)
 		return
@@ -33,15 +33,18 @@ func (c *Client) DialSSH() {
 	defer c.sending.Unlock()
 	err = c.codec.Write(&utils.Header{
 		MagicNumber: utils.NewSSH,
-	}, &server.SSHRequest{
-		ServiceId: 123,
+	}, &pkg.SSHRequest{
+		ServiceId: 234,
 		Token:     "qaq",
+		Data:      123,
 	})
 	if err != nil {
 		log.Println("client error: write to server failed", err)
 	}
 
 	go c.Receive()
+	for {
+	}
 }
 
 func (c *Client) Receive() {
@@ -55,7 +58,7 @@ func (c *Client) Receive() {
 
 		switch header.MagicNumber {
 		case utils.NewSSH:
-			response := server.SSHResponse{}
+			response := pkg.SSHResponse{}
 			err = c.codec.ReadBody(&response)
 			if response.Code == 0 {
 				go c.ProxySSH()
@@ -69,11 +72,12 @@ func (c *Client) Receive() {
 }
 
 func (c *Client) ProxySSH() {
-	l, err := net.Listen("tcp", ":7070")
+	l, err := net.Listen("tcp", ":9090")
 	if err != nil {
 		log.Fatalf("client fatal: listen local ssh failed")
 		return
 	}
+	log.Println("proxy...")
 	conn, _ := l.Accept()
 	go io.Copy(conn, c.codec.GetConn())
 	io.Copy(c.codec.GetConn(), conn)

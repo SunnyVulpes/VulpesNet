@@ -1,9 +1,9 @@
 package main
 
 import (
-	"VulpesNet/client"
-	"VulpesNet/server"
-	"VulpesNet/service"
+	main2 "VulpesNet/cmd/client"
+	"VulpesNet/cmd/server"
+	"VulpesNet/cmd/service"
 	"log"
 	"time"
 )
@@ -23,9 +23,19 @@ func Service() {
 }
 
 func Client() {
-	time.Sleep(5 * time.Second)
-	c := client.InitClient()
+	time.Sleep(2 * time.Second)
+	c := main2.InitClient()
 	c.DialSSH()
+	//time.Sleep(2 * time.Second)
+	//conn, err := net.Dial("tcp", ":9090")
+	//if err != nil {
+	//	log.Println(err)
+	//}
+	//_, err = conn.Write([]byte("test"))
+	//if err != nil {
+	//	log.Println(err)
+	//}
+
 	time.Sleep(15 * time.Minute)
 }
 

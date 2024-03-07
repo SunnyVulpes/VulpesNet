@@ -17,4 +17,9 @@ type Codec interface {
 const (
 	NewSSH = iota
 	RegisterService
+	ReverseConn
 )
+
+//const Host = "localhost"
+
+const Host = "47.92.71.42"
